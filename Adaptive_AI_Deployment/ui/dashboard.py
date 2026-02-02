@@ -1,7 +1,15 @@
+import sys
+import os
 import streamlit as st
 import requests
 import time
 import os
+
+# Allow UI to access project root
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+
+
 
 # =====================================================
 # CONFIGURATION (VERY IMPORTANT)
@@ -182,3 +190,4 @@ Adaptive Cognitive AI Framework for Personalized Mental Health Monitoring
 <br>Phase-2 & Phase-3 | Cloud Deployment (Render)
 </div>
 """, unsafe_allow_html=True)
+
