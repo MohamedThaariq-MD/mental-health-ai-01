@@ -1,19 +1,32 @@
 import streamlit as st
 import requests
 import time
+import os
 
-# -------------------------------
+# =====================================================
+# CONFIGURATION (VERY IMPORTANT)
+# =====================================================
+
+# 👉 LOCAL MODE (use this when running on your PC)
+# API_URL = "http://127.0.0.1:5000/analyze"
+
+# 👉 CLOUD MODE (Render backend URL)
+API_URL = "https://mental-health-backend.onrender.com/analyze"
+# ⬆️ Replace with YOUR actual Render backend URL
+
+
+# =====================================================
 # PAGE CONFIG
-# -------------------------------
+# =====================================================
 st.set_page_config(
     page_title="Adaptive Cognitive Mental Health AI",
     page_icon="🧠",
     layout="wide"
 )
 
-# -------------------------------
+# =====================================================
 # CUSTOM CSS (BRIGHT + ELEGANT)
-# -------------------------------
+# =====================================================
 st.markdown("""
 <style>
 body {
@@ -53,9 +66,9 @@ h2, h3 {
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------------
+# =====================================================
 # HEADER
-# -------------------------------
+# =====================================================
 st.markdown("<h1>🧠 Adaptive Cognitive Mental Health AI</h1>", unsafe_allow_html=True)
 st.markdown(
     "### Emotion-Aware Therapy Recommendation System  \n"
@@ -64,14 +77,14 @@ st.markdown(
 
 st.divider()
 
-# -------------------------------
+# =====================================================
 # LAYOUT
-# -------------------------------
+# =====================================================
 left_col, right_col = st.columns([1.2, 1])
 
-# -------------------------------
+# =====================================================
 # LEFT COLUMN – USER INPUT
-# -------------------------------
+# =====================================================
 with left_col:
     st.subheader("💬 Express Yourself")
     text = st.text_area(
@@ -82,9 +95,9 @@ with left_col:
 
     analyze_btn = st.button("✨ Analyze My Emotion", use_container_width=True)
 
-# -------------------------------
+# =====================================================
 # RIGHT COLUMN – INFO PANEL
-# -------------------------------
+# =====================================================
 with right_col:
     st.subheader("📌 System Highlights")
     st.info(
@@ -95,73 +108,77 @@ with right_col:
         "• SDG-3 Aligned Mental Health AI"
     )
 
-# -------------------------------
-# ANALYSIS LOGIC
-# -------------------------------
+# =====================================================
+# ANALYSIS LOGIC (SAFE VERSION)
+# =====================================================
 if analyze_btn:
-    if text.strip() == "":
+    if not text.strip():
         st.warning("⚠️ Please enter how you feel before analysis.")
     else:
         with st.spinner("🔍 Understanding your emotions..."):
-            time.sleep(1.2)
+            time.sleep(1)
 
             try:
                 response = requests.post(
-                    "http://127.0.0.1:5000/analyze",
+                    API_URL,
                     json={"text": text},
-                    timeout=10
+                    timeout=20
                 )
 
-                data = response.json()
+                if response.status_code != 200:
+                    st.error("❌ Backend returned an error.")
+                    st.code(response.text)
+                else:
+                    data = response.json()
 
-                st.divider()
-                st.subheader("📊 Emotion Analysis Results")
+                    st.divider()
+                    st.subheader("📊 Emotion Analysis Results")
 
-                col1, col2, col3 = st.columns(3)
+                    col1, col2, col3 = st.columns(3)
 
-                with col1:
+                    with col1:
+                        st.markdown(
+                            f"<div class='emotion-box'><b>Text Emotion</b><br>{data.get('text_emotion', 'N/A')}</div>",
+                            unsafe_allow_html=True
+                        )
+
+                    with col2:
+                        st.markdown(
+                            f"<div class='emotion-box'><b>Face Emotion</b><br>{data.get('face_emotion', 'N/A')}</div>",
+                            unsafe_allow_html=True
+                        )
+
+                    with col3:
+                        st.markdown(
+                            f"<div class='emotion-box'><b>Final Emotion</b><br>{data.get('final_emotion', 'N/A')}</div>",
+                            unsafe_allow_html=True
+                        )
+
+                    st.divider()
+                    st.subheader("🧘 Personalized Therapy Recommendation")
+
                     st.markdown(
-                        f"<div class='emotion-box'><b>Text Emotion</b><br>{data.get('text_emotion')}</div>",
+                        f"<div class='therapy-box'>{data.get('therapy', 'No recommendation')}</div>",
                         unsafe_allow_html=True
                     )
-
-                with col2:
-                    st.markdown(
-                        f"<div class='emotion-box'><b>Face Emotion</b><br>{data.get('face_emotion')}</div>",
-                        unsafe_allow_html=True
-                    )
-
-                with col3:
-                    st.markdown(
-                        f"<div class='emotion-box'><b>Final Emotion</b><br>{data.get('final_emotion')}</div>",
-                        unsafe_allow_html=True
-                    )
-
-                st.divider()
-                st.subheader("🧘 Personalized Therapy Recommendation")
-
-                st.markdown(
-                    f"<div class='therapy-box'>{data.get('therapy')}</div>",
-                    unsafe_allow_html=True
-                )
 
             except requests.exceptions.ConnectionError:
-                st.error("❌ Cannot connect to local backend.")
-                st.info("Make sure backend is running on http://127.0.0.1:5000")
+                st.error("❌ Cannot connect to backend service.")
+                st.info("Check if the backend URL is correct and running.")
 
             except requests.exceptions.Timeout:
-                st.error("❌ Backend request timed out.")
+                st.error("⏳ Backend is taking too long to respond (free tier may be waking up).")
 
             except Exception as e:
                 st.error("Unexpected error occurred:")
-                st.error(e)
+                st.code(str(e))
 
-# -------------------------------
+# =====================================================
 # FOOTER
-# -------------------------------
+# =====================================================
 st.markdown("""
 <div class="footer">
 Adaptive Cognitive AI Framework for Personalized Mental Health Monitoring  
-<br>Phase-2 & Phase-3 | Local Deployment
+<br>Phase-2 & Phase-3 | Cloud Deployment (Render)
 </div>
 """, unsafe_allow_html=True)
