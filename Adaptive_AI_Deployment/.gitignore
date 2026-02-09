@@ -1,0 +1,20 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Streamlit
+.streamlit/
+
+# Integration & Verification scripts
+verify_imports.py
+verify_integration.py
+
+# System items
+.DS_Store
+Thumbs.db

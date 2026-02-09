@@ -1,5 +1,6 @@
 flask
-numpy
-scikit-learn
-tensorflow-cpu
-transformers
+requests
+textblob
+opencv-python
+streamlit
+
