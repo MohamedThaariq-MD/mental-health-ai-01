@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+      - "8501:8501"
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Use camera on host (this works differently on Linux vs Windows/Mac)
+    # Note: AWS App Runner doesn't support local webcam access, but users can still use text input.
+    # To use camera in cloud, users would need to stream via WebRTC which is out of scope for now.
+    devices:
+      - "/dev/video0:/dev/video0"
