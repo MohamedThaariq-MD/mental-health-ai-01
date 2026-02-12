@@ -3,4 +3,9 @@ requests
 textblob
 opencv-python
 streamlit
+tensorflow
+fer
+matplotlib
+pandas
+numpy
 
