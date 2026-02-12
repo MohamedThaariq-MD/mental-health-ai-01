@@ -22,14 +22,14 @@ RUN pip install --no-cache-dir -r backend/requirements.txt \
 # Copy the rest of the application code
 COPY . .
 
-# Expose ports for Flask (5000) and Streamlit (8501)
-EXPOSE 5000 8501
+# Expose ports for Flask (5000) and Streamlit (7860)
+EXPOSE 5000 7860
 
 # Create a startup script to run both services
 RUN echo '#!/bin/bash\n\
-python backend/app.py & \n\
-streamlit run ui/dashboard.py --server.port 8501 --server.address 0.0.0.0\n\
-' > /app/start.sh && chmod +x /app/start.sh
+    python backend/app.py & \n\
+    streamlit run ui/dashboard.py --server.port 7860 --server.address 0.0.0.0\n\
+    ' > /app/start.sh && chmod +x /app/start.sh
 
 # Run the startup script
 CMD ["/app/start.sh"]
