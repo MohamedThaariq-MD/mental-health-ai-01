@@ -1,0 +1,31 @@
+{
+    "bored": {
+        "Game A": -0.5,
+        "Game B": 0.0,
+        "Game C": 0.0
+    },
+    "neutral": {
+        "Journey (Meditative Exploration)": 0.0,
+        "Abzu (Underwater Relaxation)": 0.0,
+        "Gris (Emotional Healing)": 0.0,
+        "Animal Crossing (Cozy Socializing)": 0.0,
+        "Minecraft (Creative Zen)": 0.0,
+        "Stardew Valley (Farming Sim)": 0.0,
+        "Tetris Effect (Flow State)": 0.0,
+        "Sky: Children of the Light (Social Adventure)": 0.0,
+        "Super Mario Odyssey (Joyful Adventure)": 0.0,
+        "Just Dance (Physical Fun)": 0.0
+    },
+    "happy": {
+        "Journey (Meditative Exploration)": 0.0,
+        "Abzu (Underwater Relaxation)": 0.0,
+        "Gris (Emotional Healing)": 0.0,
+        "Animal Crossing (Cozy Socializing)": 0.0,
+        "Minecraft (Creative Zen)": 0.0,
+        "Stardew Valley (Farming Sim)": 0.0,
+        "Tetris Effect (Flow State)": 0.0,
+        "Sky: Children of the Light (Social Adventure)": 0.1,
+        "Super Mario Odyssey (Joyful Adventure)": 0.0,
+        "Just Dance (Physical Fun)": 0.0
+    }
+}
