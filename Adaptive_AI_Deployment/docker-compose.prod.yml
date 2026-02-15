@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+      - "7860:7860"
+    restart: always
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Ensure these match your .env file on the server
+      # No 'volumes' to ensure we use the built image code, not host code
+      # No 'devices' as EC2 has no webcam
