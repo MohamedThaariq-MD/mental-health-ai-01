@@ -9,6 +9,17 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            age INTEGER,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS analysis_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -228,6 +239,57 @@ def save_feedback(session_id, emotion, action, reward):
     except Exception as e:
         print(f"Database error saving feedback: {e}")
         return False
+
+# --- USER AUTHENTICATION FUNCTIONS ---
+import hashlib
+
+def _hash_password(password):
+    """Simple SHA-256 hash for local prototype authentication."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def create_user(username, age, email, password):
+    """Registers a new user in the database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        pw_hash = _hash_password(password)
+        cursor.execute('''
+            INSERT INTO users (username, age, email, password_hash)
+            VALUES (?, ?, ?, ?)
+        ''', (username, age, email, pw_hash))
+        conn.commit()
+        conn.close()
+        return True, "User registered successfully."
+    except sqlite3.IntegrityError:
+        return False, "Email already exists."
+    except Exception as e:
+        print(f"Database error registering user: {e}")
+        return False, str(e)
+
+def authenticate_user(email, password):
+    """Authenticates a user and returns their row dict if successful."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        pw_hash = _hash_password(password)
+        cursor.execute('''
+            SELECT id, username, age, email FROM users
+            WHERE email = ? AND password_hash = ?
+        ''', (email, pw_hash))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                "id": row[0],
+                "username": row[1],
+                "age": row[2],
+                "email": row[3]
+            }
+        return None
+    except Exception as e:
+        print(f"Database error authenticating user: {e}")
+        return None
 
 if __name__ == "__main__":
     init_db()

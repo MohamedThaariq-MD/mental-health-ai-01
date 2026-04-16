@@ -3,7 +3,7 @@ import pickle
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
@@ -34,27 +34,29 @@ X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=42, stratify=y
 )
 
-# TF-IDF Vectorizer — keep pronouns by not removing stop words
-tfidf = TfidfVectorizer(ngram_range=(1, 3), max_features=15000, min_df=2)
+# TF-IDF Vectorizer
+tfidf = TfidfVectorizer(ngram_range=(1, 4), max_features=20000, min_df=2)
 
-# Fast LogisticRegression — 10-50x faster inference than a RandomForest ensemble
-# saga solver handles L2 regularization well on multi-class problems
-lr = LogisticRegression(
-    class_weight='balanced',
-    C=5.0,
-    max_iter=2000,
-    solver='saga',
-    multi_class='multinomial',
-    n_jobs=-1  # use all CPU cores
+# Advanced Neural Network (MLP) for NLP
+mlp = MLPClassifier(
+    hidden_layer_sizes=(256, 128), 
+    activation='relu', 
+    solver='adam', 
+    alpha=0.0001, 
+    batch_size='auto',
+    learning_rate='adaptive', 
+    max_iter=500, 
+    random_state=42,
+    early_stopping=False
 )
 
-# Single-step Pipeline (no ensemble overhead)
+# Single-step Pipeline
 pipeline = Pipeline([
     ('tfidf', tfidf),
-    ('clf', lr)
+    ('clf', mlp)
 ])
 
-print("Training the fast LogisticRegression text emotion model...")
+print("Training the Advanced MLP Neural Network text emotion model...")
 pipeline.fit(X_train, y_train)
 
 print("Evaluating the model...")

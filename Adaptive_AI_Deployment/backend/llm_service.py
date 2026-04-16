@@ -180,8 +180,8 @@ def _call_openai(api_key, user_text, history, system_prompt):
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
             
-        # Add recent history (limited to last 20 turns to save context)
-        for msg in history[-20:]:
+        # Add recent history (limited to last 6 turns to save context)
+        for msg in history[-6:]:
             role = "user" if msg["role"] == "user" else "assistant"
             messages.append({"role": role, "content": msg["content"]})
             
@@ -191,7 +191,7 @@ def _call_openai(api_key, user_text, history, system_prompt):
             model="gpt-3.5-turbo",
             messages=messages,
             temperature=0.7,
-            max_tokens=600  # Increased from 300 to handle longer inputs
+            max_tokens=200
         )
         
         return response.choices[0].message.content
@@ -213,8 +213,8 @@ def _call_groq(api_key, user_text, history, system_prompt):
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
             
-        # Add recent history (limited to last 20 turns to save context)
-        for msg in history[-20:]:
+        # Add recent history (limited to last 6 turns to save context and avoid LLM repetitive loops)
+        for msg in history[-6:]:
             role = "user" if msg["role"] == "user" else "assistant"
             messages.append({"role": role, "content": msg["content"]})
             
@@ -223,11 +223,11 @@ def _call_groq(api_key, user_text, history, system_prompt):
         payload = {
             "model": "llama-3.1-8b-instant",
             "messages": messages,
-            "temperature": 0.7,
-            "max_tokens": 600  # Increased from 300 — 300 tokens cut off mid-reply on longer inputs
+            "temperature": 0.85, # Increased for higher response variability
+            "max_tokens": 200
         }
         
-        response = requests.post(url, headers=headers, json=payload, timeout=30)  # Increased from 10s
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         
         if response.status_code == 200:
             return response.json()["choices"][0]["message"]["content"]

@@ -12,6 +12,7 @@ import uuid
 import json
 import streamlit.components.v1 as components
 import base64
+import hashlib
 
 # =====================================================
 # PROJECT PATH FIX
@@ -40,11 +41,14 @@ def get_persistent_session_id():
         json.dump({"session_id": new_id}, f)
     return new_id
 
+from backend import database as auth_db
+
 # Initialize Session
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
 if "user_session_id" not in st.session_state:
     st.session_state.user_session_id = get_persistent_session_id()
-
-
 # =====================================================
 # PAGE CONFIG
 # =====================================================
@@ -52,8 +56,119 @@ st.set_page_config(
     page_title="LYKA AI",
     page_icon="🧠",
     layout="wide",
-    initial_sidebar_state="collapsed"  # Start collapsed; user opens via hamburger button
+    initial_sidebar_state="collapsed"
 )
+
+# =====================================================
+# AUTHENTICATION ENFORCEMENT
+# =====================================================
+def load_user_history(email):
+    history = auth_db.get_conversation_history(email, limit=50)
+    st.session_state.messages = []
+    for row in history:
+        time_str = ""
+        if row["timestamp"] and " " in row["timestamp"]:
+            try:
+                time_str = datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S").strftime("%I:%M %p")
+            except:
+                time_str = row["timestamp"].split()[1][:5]
+        
+        st.session_state.messages.append({
+            "role": "user",
+            "content": row["user_text"],
+            "time": time_str
+        })
+        if row["ai_response"]:
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": row["ai_response"],
+                "streaming": False,
+                "time": time_str
+            })
+
+def authenticate_and_login(email, password):
+    user = auth_db.authenticate_user(email, password)
+    if user:
+        st.session_state.logged_in = True
+        st.session_state.username = user["username"]
+        st.session_state.user_session_id = user["email"]
+        load_user_history(user["email"])
+        st.rerun()
+    else:
+        st.error("Invalid email or password.")
+
+def register_and_login(username, age, email, password):
+    success, msg = auth_db.create_user(username, age, email, password)
+    if success:
+        st.success("Welcome to LYKA!")
+        st.session_state.logged_in = True
+        st.session_state.username = username
+        st.session_state.user_session_id = email
+        load_user_history(email)
+        st.rerun()
+    else:
+        st.error(msg)
+
+def render_login_page():
+    # Inject Custom Login CSS specifically for this view
+    st.markdown("""
+        <style>
+        .stApp { background: linear-gradient(135deg, #060b18 0%, #0d1424 40%, #130d2e 70%, #080c14 100%) !important; background-attachment: fixed !important; }
+        .stApp::before {
+            content: ''; position: fixed; inset: 0;
+            background-image: radial-gradient(1px 1px at 20% 30%, rgba(255,255,255,0.12) 0%, transparent 100%),
+                              radial-gradient(1px 1px at 80% 60%, rgba(255,255,255,0.08) 0%, transparent 100%),
+                              radial-gradient(1px 1px at 50% 80%, rgba(255,255,255,0.06) 0%, transparent 100%);
+            pointer-events: none; z-index: 0;
+        }
+        /* Style tabs to look sleek */
+        .stTabs [data-baseweb="tab-list"] { gap: 8px; background: rgba(30,41,59,0.4); border-radius: 12px; padding: 4px; }
+        .stTabs [data-baseweb="tab"] { border-radius: 8px; padding: 10px 20px; transition: all 0.3s; }
+        .stTabs [data-baseweb="tab"]:hover { background: rgba(124,58,237,0.15); }
+        .stTabs [data-baseweb="tab"][aria-selected="true"] { background: #7c3aed; color: #fff !important; }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+        <div style="text-align: center; margin-top: 60px; margin-bottom: 30px;">
+            <h1 style="font-size: 5rem; margin-bottom: 0; padding-bottom:0; color: #7c3aed; font-weight: 800; letter-spacing: 0.15em; text-shadow: 0 0 25px rgba(124,58,237,0.6);">LYKA</h1>
+            <p style="color: #8b9bb4; font-size: 1.2rem; font-family: sans-serif; letter-spacing: 0.05em; margin-top: 5px;">Adaptive Emotional Intelligence</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
+        st.markdown('<div style="background: rgba(17, 24, 39, 0.7); max-width: 500px; margin: 0 auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 30px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); border-top: 1px solid rgba(124,58,237,0.3);">', unsafe_allow_html=True)
+        tab1, tab2 = st.tabs(["Log In", "Sign Up"])
+        with tab1:
+            st.markdown("<h4 style='color: #f1f5f9; font-weight: 500; margin-bottom: 15px;'>Welcome back</h4>", unsafe_allow_html=True)
+            email_in = st.text_input("Email Address", key="log_email")
+            pass_in = st.text_input("Password", type="password", key="log_pass")
+            st.markdown("<br/>", unsafe_allow_html=True)
+            if st.button("Log into LYKA", use_container_width=True, type="primary"):
+                if email_in and pass_in:
+                    authenticate_and_login(email_in, pass_in)
+                else:
+                    st.warning("Please enter both email and password.")
+        
+        with tab2:
+            st.markdown("<h4 style='color: #f1f5f9; font-weight: 500; margin-bottom: 15px;'>Create an Account</h4>", unsafe_allow_html=True)
+            new_name = st.text_input("Username", key="reg_name")
+            new_age = st.number_input("Age", min_value=10, max_value=120, value=25, key="reg_age", step=1)
+            new_email = st.text_input("Email Address", key="reg_email")
+            new_pass = st.text_input("Password", type="password", key="reg_pass")
+            st.markdown("<br/>", unsafe_allow_html=True)
+            if st.button("Join LYKA", use_container_width=True, type="primary"):
+                if new_name and new_email and new_pass:
+                    register_and_login(new_name, new_age, new_email, new_pass)
+                else:
+                    st.warning("Please fill all required fields.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
+
+if not st.session_state.logged_in:
+    render_login_page()
+
 
 # =====================================================
 # CUSTOM CSS
@@ -371,41 +486,81 @@ st.markdown("""
         color: var(--text-dim) !important;
     }
 
-    /* Mic / Audio button */
+    /* Mic / Audio button — style the native st.audio_input as a purple circle mic icon */
+    div[data-testid="stAudioInput"] {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        min-height: 44px !important;
+    }
+    /* Record button */
     div[data-testid="stAudioInput"] button {
         border-radius: 50% !important;
-        width: 40px !important;
-        height: 40px !important;
-        min-width: 40px !important;
-        min-height: 40px !important;
+        width: 44px !important;
+        height: 44px !important;
+        min-width: 44px !important;
+        min-height: 44px !important;
+        padding: 0 !important;
         background: var(--accent) !important;
-        color: white !important;
         border: none !important;
-        box-shadow: 0 4px 12px rgba(124,58,237,0.4) !important;
+        box-shadow: 0 4px 12px rgba(124,58,237,0.45) !important;
         transition: all 0.2s ease !important;
+        cursor: pointer !important;
+        /* Mic SVG icon */
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white' width='20px' height='20px'%3E%3Cpath d='M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z'/%3E%3Cpath d='M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z'/%3E%3C/svg%3E") !important;
         background-repeat: no-repeat !important;
         background-position: center !important;
         background-size: 20px !important;
         color: transparent !important;
+        font-size: 0 !important;
     }
     div[data-testid="stAudioInput"] button:hover {
         background-color: #6d28d9 !important;
-        box-shadow: 0 6px 18px rgba(124,58,237,0.55) !important;
+        box-shadow: 0 6px 18px rgba(124,58,237,0.6) !important;
+        transform: scale(1.05);
     }
+    /* Stop/recording state — red pulsing */
     div[data-testid="stAudioInput"] button[aria-label*="Stop"],
     div[data-testid="stAudioInput"] button[data-testid="stAudioInputStopButton"] {
         background-color: #dc2626 !important;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Crect x='6' y='6' width='12' height='12'/%3E%3C/svg%3E") !important;
-        box-shadow: 0 4px 12px rgba(220,38,38,0.5) !important;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Crect x='6' y='6' width='12' height='12' rx='2'/%3E%3C/svg%3E") !important;
+        box-shadow: 0 4px 12px rgba(220,38,38,0.55) !important;
+        animation: micPulse 1.4s infinite ease-in-out;
     }
+    @keyframes micPulse {
+        0%   { box-shadow: 0 0 0 0   rgba(220,38,38,0.7); }
+        70%  { box-shadow: 0 0 0 10px rgba(220,38,38,0);   }
+        100% { box-shadow: 0 0 0 0   rgba(220,38,38,0);   }
+    }
+    /* Hide everything except the actual record button */
+    /* Target internal elements of st.audio_input specifically so we only see the mic circle */
+    div[data-testid="stAudioInput"] > div:not(:first-child), 
     div[data-testid="stAudioInput"] label,
-    div[data-testid="stAudioInput"] [role="toolbar"],
+    div[data-testid="stAudioInput"] [role="progressbar"],
     div[data-testid="stAudioInput"] [class*="Waveform"],
-    div[data-testid="stAudioInput"] span,
-    div[data-testid="stAudioInput"] [data-testid="stMarkdownContainer"] {
+    div[data-testid="stAudioInput"] [class*="waveform"],
+    div[data-testid="stAudioInput"] audio,
+    div[data-testid="stAudioInput"] span[data-baseweb="typography"],
+    div[data-testid="stAudioInput"] div[data-baseweb],
+    div[data-testid="stAudioInput"] > div > div > div {
         display: none !important;
     }
+    div[data-testid="stAudioInput"] > div {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    
+    /* Make sure the toolbar (if rendered) is completely hidden except the button we target above */
+    div[data-testid="stAudioInput"] [role="toolbar"] {
+        display: flex !important;
+        background: transparent !important;
+        border: none !important;
+    }
+
 
     /* Strip white card backgrounds from column wrappers */
     div[data-testid="stHorizontalBlock"],
@@ -755,7 +910,7 @@ components.html("""
 
 })();
 </script>
-""", height=0)
+""")
 
 # =====================================================
 # SIDEBAR
@@ -783,11 +938,8 @@ with st.sidebar:
 
     st.header("⚙️ Settings")
     
-    # Camera only available in Therapy Mode
-    if interaction_mode == "Therapy Recommendations":
-        use_camera = st.checkbox("Enable Facial Analysis", value=True, help="Uses your webcam to analyze facial expressions")
-    else:
-        use_camera = False
+    # Features disabled specifically for cleaner UI based on update 03
+    use_camera = False
 
     # Audio Input (Removed from Sidebar)
     audio_value = None
@@ -854,7 +1006,7 @@ def render_mic_button(session_id: str, key: str = "mic"):
     - Pulsating red stop icon while recording
     - POSTs audio blob directly to Flask /upload_audio so Python can read it
     """
-    components.html(f"""
+    st.html(f"""
     <style>
       body {{ margin:0; padding:0; background:transparent; display:flex;
                align-items:center; justify-content:center; height:56px; overflow:hidden; }}
@@ -1122,15 +1274,96 @@ def render_chat_interface():
     bottom_container = st.container()
     with bottom_container:
         st.markdown('<div class="input-bottom-anchor"></div>', unsafe_allow_html=True)
-        col_input, col_mic = st.columns([11, 1])
+        col_input, col_mic = st.columns([10, 2])
     
         with col_input:
             st.text_input("Message", key="chat_input", on_change=handle_chat_input, label_visibility="collapsed", placeholder="Message LYKA...")
     
         with col_mic:
-            render_mic_button(st.session_state.user_session_id, key="chat_mic")
+                # Embedded HTML Custom Mic that bypasses the HF proxy limit
+                # by securely dispatching audio base64 across the iframe to a hidden Streamlit text widget!
+                components.html("""
+                <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+                <style>
+                    body { margin: 0; padding: 0; background: transparent; display: flex; justify-content: center; align-items: center; overflow: hidden; font-family: sans-serif; }
+                    #mic-btn { width: 44px; height: 44px; border-radius: 50%; border: none; background: #7c3aed; color: white; cursor: pointer; box-shadow: 0 4px 12px rgba(124, 58, 237, 0.4); display: flex; justify-content: center; align-items: center; transition: all 0.3s ease; outline: none; }
+                    #mic-btn:hover { background: #6d28d9; box-shadow: 0 6px 18px rgba(124, 58, 237, 0.55); transform: scale(1.05); }
+                    #mic-btn.recording { background: #dc2626; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.5); animation: pulse-recording 1.5s infinite; }
+                    #mic-btn.recording:hover { background: #b91c1c; }
+                    @keyframes pulse-recording { 0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); } 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); } }
+                </style>
+                <button id="mic-btn" title="Start Recording"><span class="material-icons" id="mic-icon">mic</span></button>
+                <script>
+                    let isRecording = false; let mediaRecorder = null; let audioChunks = [];
+                    const micBtn = document.getElementById("mic-btn"); const micIcon = document.getElementById("mic-icon");
+                    
+                    function hideBridge() {
+                        try {
+                            const bridge = window.parent.document.querySelector('input[aria-label="chat_audio_hidden"]');
+                            if (bridge) {
+                                // Use zero-height instead of display:none so Streamlit React still detects value changes
+                                const wrapper = bridge.parentElement.parentElement.parentElement;
+                                wrapper.style.overflow = 'hidden';
+                                wrapper.style.height = '0px';
+                                wrapper.style.margin = '0px';
+                                wrapper.style.padding = '0px';
+                                wrapper.style.opacity = '0';
+                                wrapper.style.pointerEvents = 'none';
+                            }
+                        } catch(e) {}
+                    }
+                    // Delay hiding so input is fully mounted in DOM first
+                    setTimeout(hideBridge, 800);
+                    
+                    function sendAudioToStreamlit(base64data) {
+                        try {
+                            const textAreas = window.parent.document.querySelectorAll('input[aria-label="chat_audio_hidden"]');
+                            if (textAreas.length > 0) {
+                                let ta = textAreas[0];
+                                let nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                                nativeInputValueSetter.call(ta, base64data);
+                                ta.dispatchEvent(new Event('input', { bubbles: true }));
+                                ta.dispatchEvent(new Event('change', { bubbles: true }));
+                                const enterEvent = new KeyboardEvent('keydown', {
+                                  bubbles: true, cancelable: true, keyCode: 13, key: 'Enter', code: 'Enter'
+                                });
+                                ta.dispatchEvent(enterEvent);
+                            }
+                        } catch (e) { console.error("Could not cross-frame interact", e); }
+                    }
 
-    components.html("<script>setTimeout(function() { window.parent.scrollTo({ top: window.parent.document.body.scrollHeight, behavior: 'smooth' }); }, 500);</script>", height=0)
+                    async function startRecording() {
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        mediaRecorder = new MediaRecorder(stream);
+                        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+                        mediaRecorder.onstop = () => {
+                            micIcon.innerText = "hourglass_empty"; micBtn.classList.remove('recording');
+                            const reader = new FileReader();
+                            reader.readAsDataURL(new Blob(audioChunks, { type: 'audio/webm' }));
+                            reader.onloadend = () => {
+                                sendAudioToStreamlit(reader.result);
+                                setTimeout(() => { micBtn.title = "Start Recording"; micIcon.innerText = "mic"; isRecording = false; }, 500);
+                            };
+                            stream.getTracks().forEach(t => t.stop());
+                        };
+                        mediaRecorder.start(); isRecording = true; audioChunks = [];
+                        micBtn.classList.add("recording"); micIcon.innerText = "stop"; micBtn.title = "Stop Recording";
+                    }
+                    micBtn.addEventListener("click", () => { if (!isRecording) startRecording(); else mediaRecorder.stop(); });
+                </script>
+                """, height=56)
+                
+                # Hidden input to receive JS payload natively
+                chat_audio_b64 = col_mic.text_input("chat_audio_hidden", key="chat_audio_hidden", label_visibility="collapsed")
+                if chat_audio_b64 and chat_audio_b64.startswith("data:audio"):
+                    try:
+                        b64_str = chat_audio_b64.split(",")[1] if "," in chat_audio_b64 else chat_audio_b64
+                        st.session_state["pending_chat_audio"] = base64.b64decode(b64_str)
+                    except Exception as e:
+                        print("Error decoding custom mic.", e)
+
+    # Use HTML to scroll smoothly to bottom
+    st.html("<script>setTimeout(function() { window.parent.scrollTo({ top: window.parent.document.body.scrollHeight, behavior: 'smooth' }); }, 500);</script>")
 
     return None
 
@@ -1154,18 +1387,110 @@ def render_therapy_interface():
     bottom_container = st.container()
     with bottom_container:
         st.markdown('<div class="input-bottom-anchor"></div>', unsafe_allow_html=True)
-        col1, col2 = st.columns([10, 1])
+        col1, col2 = st.columns([9, 2])
 
         with col1:
             st.text_input("How are you feeling?", key="therapy_input", on_change=handle_therapy_input, label_visibility="collapsed", placeholder="Share your thoughts...")
 
         with col2:
-            render_mic_button(st.session_state.user_session_id, key="therapy_mic")
+            # Exact same logic as chat for therapy mic
+            components.html("""
+            <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+            <style>
+                body { margin: 0; padding: 0; background: transparent; display: flex; justify-content: center; align-items: center; overflow: hidden; font-family: sans-serif; }
+                #mic-btn { width: 44px; height: 44px; border-radius: 50%; border: none; background: #7c3aed; color: white; cursor: pointer; box-shadow: 0 4px 12px rgba(124, 58, 237, 0.4); display: flex; justify-content: center; align-items: center; transition: all 0.3s ease; outline: none; }
+                #mic-btn:hover { background: #6d28d9; box-shadow: 0 6px 18px rgba(124, 58, 237, 0.55); transform: scale(1.05); }
+                #mic-btn.recording { background: #dc2626; box-shadow: 0 4px 12px rgba(220, 38, 38, 0.5); animation: pulse-recording 1.5s infinite; }
+                #mic-btn.recording:hover { background: #b91c1c; }
+                @keyframes pulse-recording { 0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); } 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); } }
+            </style>
+            <button id="mic-btn" title="Start Recording"><span class="material-icons" id="mic-icon">mic</span></button>
+            <script>
+                let isRecording = false; let mediaRecorder = null; let audioChunks = [];
+                const micBtn = document.getElementById("mic-btn"); const micIcon = document.getElementById("mic-icon");
+                
+                function hideBridge() {
+                    try {
+                        const bridge = window.parent.document.querySelector('input[aria-label="therapy_audio_hidden"]');
+                        if (bridge) {
+                            const wrapper = bridge.parentElement.parentElement.parentElement;
+                            wrapper.style.overflow = 'hidden';
+                            wrapper.style.height = '0px';
+                            wrapper.style.margin = '0px';
+                            wrapper.style.padding = '0px';
+                            wrapper.style.opacity = '0';
+                            wrapper.style.pointerEvents = 'none';
+                        }
+                    } catch(e) {}
+                }
+                // Delay hiding so input is fully mounted in DOM first
+                setTimeout(hideBridge, 800);
 
-    components.html("<script>setTimeout(function() { window.parent.scrollTo({ top: window.parent.document.body.scrollHeight, behavior: 'smooth' }); }, 500);</script>", height=0)
+                function sendAudioToStreamlit(base64data) {
+                    try {
+                        const textAreas = window.parent.document.querySelectorAll('input[aria-label="therapy_audio_hidden"]');
+                        if (textAreas.length > 0) {
+                            let ta = textAreas[0];
+                            let nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                            nativeInputValueSetter.call(ta, base64data);
+                            ta.dispatchEvent(new Event('input', { bubbles: true }));
+                            ta.dispatchEvent(new Event('change', { bubbles: true }));
+                            const enterEvent = new KeyboardEvent('keydown', {
+                              bubbles: true, cancelable: true, keyCode: 13, key: 'Enter', code: 'Enter'
+                            });
+                            ta.dispatchEvent(enterEvent);
+                        }
+                    } catch (e) { console.error("Could not cross-frame interact", e); }
+                }
+                async function startRecording() {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+                    mediaRecorder.onstop = () => {
+                        micIcon.innerText = "hourglass_empty"; micBtn.classList.remove('recording');
+                        const reader = new FileReader();
+                        reader.readAsDataURL(new Blob(audioChunks, { type: 'audio/webm' }));
+                        reader.onloadend = () => {
+                            sendAudioToStreamlit(reader.result);
+                            setTimeout(() => { micBtn.title = "Start Recording"; micIcon.innerText = "mic"; isRecording = false; }, 500);
+                        };
+                        stream.getTracks().forEach(t => t.stop());
+                    };
+                    mediaRecorder.start(); isRecording = true; audioChunks = [];
+                    micBtn.classList.add("recording"); micIcon.innerText = "stop"; 
+                }
+                micBtn.addEventListener("click", () => { if (!isRecording) startRecording(); else mediaRecorder.stop(); });
+            </script>
+            """, height=56)
+            
+            therapy_audio_b64 = col2.text_input("therapy_audio_hidden", key="therapy_audio_hidden", label_visibility="collapsed")
+            if therapy_audio_b64 and therapy_audio_b64.startswith("data:audio"):
+                try:
+                    b64_str = therapy_audio_b64.split(",")[1] if "," in therapy_audio_b64 else therapy_audio_b64
+                    st.session_state["pending_therapy_audio"] = base64.b64decode(b64_str)
+                except Exception as e:
+                    print("Error decoding therapy custom mic.", e)
 
-    if use_camera:
-        st.caption("📷 Facial Analysis Active")
+    st.html("<script>setTimeout(function() { window.parent.scrollTo({ top: window.parent.document.body.scrollHeight, behavior: 'smooth' }); }, 500);</script>")
+
+    # ---------- Camera (Therapy Mode) ----------
+    if st.session_state.get("therapy_awaiting_camera"):
+        st.markdown("""
+        <div style="background: rgba(17,24,39,0.8); border: 1px solid #7c3aed;
+                    border-radius: 14px; padding: 12px 16px; margin-bottom: 8px;">
+            <div style="color: #a78bfa; font-size: 0.85rem; font-weight: 600; margin-bottom: 6px;">
+                📷 Facial Analysis
+            </div>
+            <div style="color: #cbd5e1; font-size: 0.75rem;">
+                Please capture your expression to proceed with the analysis.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        therapy_cam_photo = st.camera_input("Take a photo", key="therapy_cam", label_visibility="collapsed")
+        if therapy_cam_photo:
+            st.session_state["pending_cam_frame"] = therapy_cam_photo.read()
+            st.success("Photo captured! Processing...", icon="✅")
+            st.rerun()
 
     # Results Section
     # Only verify if we have a LATEST analysis that matches the current session interaction
@@ -1389,6 +1714,8 @@ if "show_emergency_form" not in st.session_state:
     st.session_state.show_emergency_form = False
 if "audio_ready" not in st.session_state:
     st.session_state.audio_ready = False
+if "processed_audio_hash" not in st.session_state:
+    st.session_state.processed_audio_hash = None
 # Ensure these always exist so first-message reads never KeyError
 if "temp_chat_value" not in st.session_state:
     st.session_state.temp_chat_value = ""
@@ -1401,86 +1728,124 @@ if interaction_mode == "Wholesome Conversation":
 else:
     render_therapy_interface()
 
-# 1. Check for inputs (from callbacks or audio)
+# 1. Check for inputs
 prompt = None
+camera_frame_bytes = None  # For st.camera_input image
 
-# Poll Flask for any audio recorded by the embedded mic button
-try:
-    _audio_poll = requests.get(
-        f"{API_BASE_URL}/get_audio",
-        params={"session_id": st.session_state.user_session_id},
-        timeout=1
-    )
-    if _audio_poll.status_code == 200:
-        _b64 = _audio_poll.json().get("audio_b64")
-        if _b64:
-            prompt = {"audio_bytes": base64.b64decode(_b64)}
-except Exception:
-    pass  # Flask not yet running or timeout — silently ignore
+def check_audio(audio_data):
+    """Check if audio is already processed to prevent infinite loops"""
+    audio_hash = hashlib.md5(audio_data).hexdigest()
+    if audio_hash == st.session_state.processed_audio_hash:
+        return False
+    # Set to current hash so we don't process it next rerun
+    st.session_state.processed_audio_hash = audio_hash
+    return True
 
+# --- Check native/custom audio results (stored in session) ---
 if interaction_mode == "Wholesome Conversation":
-    # Text input from callback takes priority only when no audio
-    if not prompt and "temp_chat_value" in st.session_state and st.session_state.temp_chat_value:
+    # Text input from callback takes priority
+    if "temp_chat_value" in st.session_state and st.session_state.temp_chat_value:
         prompt = st.session_state.temp_chat_value
         st.session_state.temp_chat_value = ""
-
-    # Fallback: session-state bytes (legacy)
-    if not prompt and st.session_state.get("chat_mic_bytes"):
-        prompt = {"audio_bytes": st.session_state.chat_mic_bytes}
-        st.session_state.chat_mic_bytes = None
-
+    # Audio input
+    elif st.session_state.get("pending_chat_audio"):
+        _aud = st.session_state.pop("pending_chat_audio")
+        if check_audio(_aud):
+            prompt = {"audio_bytes": _aud}
 else:
-    if not prompt and "temp_therapy_value" in st.session_state and st.session_state.temp_therapy_value:
-        prompt = st.session_state.temp_therapy_value
+    # Text input (Intercept to show camera first)
+    if "temp_therapy_value" in st.session_state and st.session_state.temp_therapy_value:
+        st.session_state["therapy_awaiting_camera"] = st.session_state.temp_therapy_value
         st.session_state.temp_therapy_value = ""
-
-    if not prompt and st.session_state.get("therapy_mic_bytes"):
-        prompt = {"audio_bytes": st.session_state.therapy_mic_bytes}
-        st.session_state.therapy_mic_bytes = None
-
-# 2. Check for persistent audio from a previous reset
-if not prompt and st.session_state.get("pending_audio"):
-    prompt = {"audio_bytes": st.session_state.pending_audio}
-    st.session_state.pending_audio = None
+        
+    # Pick up camera frame captured by st.camera_input
+    if st.session_state.get("therapy_awaiting_camera") and st.session_state.get("pending_cam_frame"):
+        prompt = st.session_state.pop("therapy_awaiting_camera")
+        camera_frame_bytes = st.session_state.pop("pending_cam_frame")
+        use_camera = True
+        
+    # Audio input
+    elif st.session_state.get("pending_therapy_audio"):
+        _aud = st.session_state.pop("pending_therapy_audio")
+        if check_audio(_aud):
+            with st.spinner("🎤 Transcribing your voice..."):
+                try:
+                    b64_aud = base64.b64encode(_aud).decode('utf-8')
+                    res = requests.post(
+                        f"{API_BASE_URL}/transcribe",
+                        json={"audio_b64": b64_aud},
+                        timeout=30
+                    )
+                    if res.status_code == 200:
+                        tr_json = res.json()
+                        text = tr_json.get("text", "").strip()
+                        v_emo = tr_json.get("voice_emotion")
+                        if text:
+                            st.session_state.temp_therapy_value = text
+                            st.session_state.transcribed_voice_emotion = v_emo
+                            st.rerun()
+                        else:
+                            st.error("⚠️ Could not understand the audio.")
+                    else:
+                        st.error("Transcription failed.")
+                except Exception as e:
+                    st.error(f"Voice error: {e}")
 
 # Process Input if prompt exists
 if prompt:
     st.session_state.is_processing = True
     
-    # --- COMMON AUDIO TRANSCRIBE LOGIC ---
+    # --- AUDIO TRANSCRIPTION ---
     audio_b64_to_send = None
+    transcribed_voice_emotion = st.session_state.pop("transcribed_voice_emotion", None)
     if isinstance(prompt, dict) and "audio_bytes" in prompt:
         audio_data = prompt["audio_bytes"]
-        # Encode audio for voice emotion analysis in backend
         audio_b64_to_send = base64.b64encode(audio_data).decode('utf-8')
-        with st.spinner("Transcribing..."):
+        with st.spinner("🎤 Transcribing your voice..."):
             try:
-                files = {"file": ("audio.wav", audio_data, "audio/wav")}
-                transcribe_res = requests.post(f"{API_BASE_URL}/transcribe", files=files)
+                b64_aud = base64.b64encode(audio_data).decode('utf-8')
+                transcribe_res = requests.post(
+                    f"{API_BASE_URL}/transcribe",
+                    json={"audio_b64": b64_aud},
+                    timeout=30
+                )
+                    
                 if transcribe_res.status_code == 200:
-                    prompt = transcribe_res.json().get("text")
+                    tr_json = transcribe_res.json()
+                    prompt = tr_json.get("text", "").strip()
+                    transcribed_voice_emotion = tr_json.get("voice_emotion")
+                    if not prompt:
+                        st.warning("⚠️ Could not understand the audio. Please try again or type your message.")
+                        prompt = None
+                    else:
+                        st.info(f"🎤 Heard: *\"{prompt}\"*")
                 else:
-                    st.error("Could not transcribe audio.")
+                    st.error("Transcription failed. Please try typing instead.")
                     prompt = None
             except Exception as e:
-                st.error(f"Error during transcription: {e}")
+                st.error(f"Voice error: {e}")
                 prompt = None
+
+    # --- CAMERA FRAME ENCODING (from st.camera_input) ---
+    cam_frame_b64 = None
+    if camera_frame_bytes:
+        cam_frame_b64 = base64.b64encode(camera_frame_bytes).decode('utf-8')
 
     # Proceed if we have a valid text prompt (either from input or transcription)
     if prompt:
         now_str = datetime.now().strftime("%I:%M %p")
-        # Add user message to history with timestamp
         st.session_state.messages.append({"role": "user", "content": prompt, "time": now_str})
         
-        # Process with Backend
         try:
-            # Prepare payload
             payload = {
                 "text": prompt, 
                 "use_camera": use_camera,
                 "session_id": st.session_state.user_session_id,
+                "username": getattr(st.session_state, "username", "User"),
                 "emergency_contact": st.session_state.get("emergency_contact"),
-                "audio_data": audio_b64_to_send
+                "audio_data": audio_b64_to_send,
+                "voice_emotion": transcribed_voice_emotion,
+                "cam_frame_b64": cam_frame_b64,  # from st.camera_input, if captured
             }
             # Make API Request
             response = requests.post(API_URL, json=payload, timeout=45)

@@ -1,16 +1,18 @@
 import os
-import pickle
 import numpy as np
-import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+import tensorflow as tf
+from tensorflow.keras import layers, models
+from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import LabelEncoder
+import pickle
 
-# Geometric Features for Emotions (Synthetic "Large" Dataset for training)
+# Geometric Features for Emotions
 # Features: [ear, mar, brow_ratio]
-# Emotions: 0:Angry, 1:Happy, 2:Sad, 3:Surprise, 4:Neutral, 5:Fear/Anxious, 6:Stressed
+# We map explicitly to our core emotions.
+EMOTIONS = ["Angry", "Happy", "Sad", "Surprise", "Neutral", "Fear", "Stressed"]
 
-def generate_synthetic_landmarks(n_samples=1000):
+def generate_synthetic_landmarks(n_samples=2500):
     data = []
     labels = []
     
@@ -35,7 +37,7 @@ def generate_synthetic_landmarks(n_samples=1000):
         data.append([np.random.normal(0.3, 0.02), np.random.normal(0.2, 0.05), np.random.normal(0.7, 0.05)])
         labels.append("Neutral")
         
-        # Fear / Anxious (Wide eyes, tense mouth)
+        # Fear
         data.append([np.random.normal(0.38, 0.02), np.random.normal(0.3, 0.05), np.random.normal(0.65, 0.05)])
         labels.append("Fear")
         
@@ -46,21 +48,56 @@ def generate_synthetic_landmarks(n_samples=1000):
     return np.array(data), np.array(labels)
 
 print("Generating synthetic landmark dataset...")
-X, y = generate_synthetic_landmarks(2000)
+X, y_text = generate_synthetic_landmarks(7000)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+encoder = LabelEncoder()
+y = encoder.fit_transform(y_text)
+y_cat = tf.keras.utils.to_categorical(y, num_classes=len(EMOTIONS))
 
-print("Training Landmark-based RF Classifier...")
-clf = RandomForestClassifier(n_estimators=100, random_state=42)
-clf.fit(X_train, y_train)
+X_train, X_test, y_train, y_test = train_test_split(X, y_cat, test_size=0.15, random_state=42)
 
-y_pred = clf.predict(X_test)
-print(f"Landmark Model Accuracy: {accuracy_score(y_test, y_pred) * 100:.2f}%")
+print("Building DL/CNN Landmark Network...")
+model = models.Sequential([
+    layers.Input(shape=(3,)),
+    layers.Dense(128, activation='relu'),
+    layers.BatchNormalization(),
+    layers.Dropout(0.3),
+    layers.Dense(64, activation='relu'),
+    layers.BatchNormalization(),
+    layers.Dropout(0.2),
+    layers.Dense(32, activation='relu'),
+    layers.Dense(len(EMOTIONS), activation='softmax')
+])
+
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+print("Training Deep Learning model over 30 epochs...")
+early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+history = model.fit(
+    X_train, y_train, 
+    epochs=40, 
+    batch_size=32, 
+    validation_data=(X_test, y_test),
+    callbacks=[early_stop],
+    verbose=1
+)
+
+loss, acc = model.evaluate(X_test, y_test, verbose=0)
+print(f"DL Landmark Model Accuracy: {acc * 100:.2f}%")
 
 # Save the model
-model_path = os.path.join(os.path.dirname(__file__), 'face_landmark_model.pkl')
-print(f"Saving landmark model to {model_path}...")
-with open(model_path, 'wb') as f:
-    pickle.dump(clf, f)
+model_path = os.path.join(os.path.dirname(__file__), 'face_landmark_model.keras')
+print(f"Saving Keras DL model to {model_path}...")
+model.save(model_path)
 
-print("Landmark training complete.")
+# Save the encoder
+encoder_path = os.path.join(os.path.dirname(__file__), 'face_landmark_encoder.pkl')
+with open(encoder_path, 'wb') as f:
+    pickle.dump(encoder, f)
+
+# Delete the old sklearn pkl model if it exists
+old_model_path = os.path.join(os.path.dirname(__file__), 'face_landmark_model.pkl')
+if os.path.exists(old_model_path):
+    os.remove(old_model_path)
+
+print("DL Landmark training complete.")

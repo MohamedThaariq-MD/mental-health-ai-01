@@ -30,6 +30,10 @@ init_db()
 # Stores temporarily uploaded audio bytes keyed by session_id
 _pending_audio_store: dict = {}
 
+# ── In-memory webcam frame bridge (browser -> backend) ──────────────────────
+# Stores the latest browser-captured webcam frame (base64 JPEG) keyed by session_id
+_pending_frame_store: dict = {}
+
 @app.route("/upload_audio", methods=["POST", "OPTIONS"])
 def upload_audio():
     """Receives raw audio bytes POSTed by the embedded JS mic."""
@@ -48,6 +52,25 @@ def get_audio():
         import base64
         return jsonify({"audio_b64": base64.b64encode(audio).decode("utf-8")})
     return jsonify({"audio_b64": None})
+
+@app.route("/upload_frame", methods=["POST", "OPTIONS"])
+def upload_frame():
+    """Receives a browser-captured webcam frame as base64 JSON."""
+    if request.method == "OPTIONS":
+        return jsonify({}), 200
+    session_id = request.args.get("session_id", "default")
+    data = request.get_json(force=True, silent=True) or {}
+    frame_b64 = data.get("frame_b64")
+    if frame_b64:
+        _pending_frame_store[session_id] = frame_b64
+    return jsonify({"status": "ok"}), 200
+
+@app.route("/get_frame", methods=["GET"])
+def get_frame():
+    """Returns the latest browser webcam frame for a session (non-destructive peek)."""
+    session_id = request.args.get("session_id", "default")
+    frame_b64 = _pending_frame_store.get(session_id)
+    return jsonify({"frame_b64": frame_b64})
 # ────────────────────────────────────────────────────────────────────────────
 
 
@@ -90,12 +113,14 @@ def analyze():
         text = data.get("text", "")
         use_camera = data.get("use_camera", False)
         session_id = data.get("session_id", str(uuid.uuid4()))  # Generate if not provided
+        username = data.get("username", "User")
         emergency_contact = data.get("emergency_contact", None)
         audio_data = data.get("audio_data", None)
 
         text_result = detect_text_emotion(text)
         text_emotion = text_result[0].get("label", "Neutral")
         emotion_intensity = text_result[0].get("intensity", "moderate")
+        nlp_stress = text_result[0].get("nlp_stress", 10)
 
         # Check if user wants facial analysis
         face_emotion = "Neutral"
@@ -105,20 +130,42 @@ def analyze():
         feature_desc = ""
         
         if use_camera:
-            try:
-                face_emotion, face_details, processed_frame, face_features, feature_desc = detect_face_emotion()
-            except Exception as e:
-                print(f"Camera error: {e}")
-                face_emotion = "Neutral"
-                face_details = {}
-                processed_frame = None
-                face_features = {}
-                feature_desc = "Camera error."
+            # Priority 1: Frame sent directly in payload (from st.camera_input — most reliable)
+            cam_frame_b64_payload = data.get("cam_frame_b64")
+            # Priority 2: Frame previously uploaded by browser JS
+            browser_frame_b64 = _pending_frame_store.get(session_id) if not cam_frame_b64_payload else None
+            
+            frame_to_analyze = cam_frame_b64_payload or browser_frame_b64
+            
+            if frame_to_analyze:
+                try:
+                    from models.emotion_face import detect_face_emotion_from_b64
+                    face_emotion, face_details, processed_frame, face_features, feature_desc = detect_face_emotion_from_b64(frame_to_analyze)
+                except Exception as e:
+                    print(f"Frame analysis error: {e}")
+                    face_emotion = "Neutral"
+                    face_details = {}
+                    processed_frame = None
+                    face_features = {}
+                    feature_desc = "Frame analysis error."
+            else:
+                # Priority 3: Server-side camera (local dev only — not available in cloud)
+                try:
+                    face_emotion, face_details, processed_frame, face_features, feature_desc = detect_face_emotion()
+                except Exception as e:
+                    print(f"Camera error: {e}")
+                    face_emotion = "Neutral"
+                    face_details = {}
+                    processed_frame = None
+                    face_features = {}
+                    feature_desc = "No photo captured. Use the camera button in Therapy Mode."
 
-        # Check for voice emotion if audio data was provided
-        voice_emotion = "Neutral"
-        if audio_data:
-            voice_emotion = detect_voice_emotion(audio_data)
+        # Check for voice emotion if provided directly or if audio data was provided
+        voice_emotion = data.get("voice_emotion")
+        if not voice_emotion or voice_emotion == "Neutral":
+            voice_emotion = "Neutral"
+            if audio_data:
+                voice_emotion = detect_voice_emotion(audio_data)
 
         # Final emotion priority: Face > Voice > Text
         if face_emotion != "Neutral":
@@ -250,36 +297,57 @@ def analyze():
             recommendations=recommendations,
             context=conversation_context,
             historical_context=historical_context,
-            conversation_history=recent_history
+            conversation_history=recent_history,
+            nlp_stress_level=nlp_stress,
+            username=username
         )
         
         ai_response = empathetic_response.get("conversational_response")
         
-        # Parse official emotion from LLM if provided in the strict format
-        if ai_response and "Emotion:" in ai_response:
-            try:
-                llm_lines = ai_response.split('\n')
-                parsed_emotion = None
-                parsed_message_lines = []
-                capture_response = False
+        # Clean up any "Emotion: Response:" or "Neutral: Response:" formatting glitches
+        if ai_response:
+            ai_response = str(ai_response)
+            
+            # Robust parser for varied LLM strict format breaking
+            parsed_message_lines = []
+            parsed_emotion = None
+            
+            lines = ai_response.split('\n')
+            capture_response = False
+            
+            for line in lines:
+                line_stripped = line.strip()
+                if not line_stripped:
+                    continue
                 
-                for line in llm_lines:
-                    if line.startswith("Emotion:"):
-                        trimmed_emotion = line.replace("Emotion:", "").strip()
-                        if trimmed_emotion in ["Happy", "Calm", "Neutral", "Sad", "Stressed", "Angry", "Anxious"]:
-                            parsed_emotion = trimmed_emotion
-                    elif line.startswith("Response:"):
-                        capture_response = True
-                        parsed_message_lines.append(line.replace("Response:", "").strip())
-                    elif capture_response:
-                        parsed_message_lines.append(line.strip())
+                # Check if line contains both Emotion and Response on the same line (e.g. "Neutral: Response: Hello")
+                if "Response:" in line:
+                    split_idx = line.find("Response:")
+                    prefix = line[:split_idx]
+                    suffix = line[split_idx + len("Response:"):].strip()
+                    
+                    # Try to glean emotion from prefix
+                    for emo in ["Happy", "Calm", "Neutral", "Sad", "Stressed", "Angry", "Anxious"]:
+                        if emo.lower() in prefix.lower():
+                            parsed_emotion = emo
+                            break
+                    
+                    if suffix:
+                        parsed_message_lines.append(suffix)
+                    capture_response = True
                 
+                elif line_stripped.startswith("Emotion:"):
+                    trimmed_emotion = line_stripped.replace("Emotion:", "").strip()
+                    if trimmed_emotion in ["Happy", "Calm", "Neutral", "Sad", "Stressed", "Angry", "Anxious"]:
+                        parsed_emotion = trimmed_emotion
+                elif capture_response:
+                    parsed_message_lines.append(line_stripped)
+            
+            # If we couldn't parse structured format but "Response:" existed, use extracted
+            if capture_response and parsed_message_lines:
+                ai_response = "\n".join(parsed_message_lines).strip()
                 if parsed_emotion:
                     final_emotion = parsed_emotion
-                if parsed_message_lines:
-                    ai_response = "\n".join(parsed_message_lines).strip()
-            except Exception as e:
-                print(f"Error parsing LLM emotion: {e}")
         
         # Save conversation turn to memory and database
         session_memory.add_exchange(
@@ -324,6 +392,7 @@ def analyze():
             "movie": recommendations.get("movie"),
             "game": recommendations.get("game"),
             "documentary": recommendations.get("documentary"),
+            "nlp_stress_level": nlp_stress,
             # New conversational fields
             "conversational_response": ai_response,
             "follow_up_suggestions": empathetic_response.get("follow_up_suggestions", []),
@@ -353,41 +422,81 @@ from flask import send_file
 
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
+    """
+    Accepts audio via:
+      1. Multipart file upload  (key: 'file')  -- standard path from dashboard
+      2. JSON body {audio_b64: "data:audio/webm;base64,..."} -- fallback
+
+    Returns: { text: "transcribed words", voice_emotion: "Stressed" }
+    """
+    import os, base64 as _b64
+    temp_path = None
+
     try:
-        if "file" not in request.files:
-            return jsonify({"error": "No file part"}), 400
-            
-        file = request.files["file"]
-        if file.filename == "":
-            return jsonify({"error": "No selected file"}), 400
-            
-        # Save temp file with the actual file extension
-        import os
-        ext = os.path.splitext(file.filename)[1]
-        if not ext:
-            ext = ".webm" # default to webm if missing
-            
-        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp:
-            file.save(temp.name)
-            temp_path = temp.name
-            
-        # Transcribe
-        text = transcribe_audio(temp_path)
-        
-        # Cleanup
-        try:
-            os.remove(temp_path)
-        except:
-            pass
-        
-        if text:
-            return jsonify({"text": text})
+        # Path 1: multipart file upload
+        if request.files and "file" in request.files:
+            file = request.files["file"]
+            ext = os.path.splitext(file.filename)[1] if file.filename else ".webm"
+            if not ext:
+                ext = ".webm"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                file.save(tmp.name)
+                temp_path = tmp.name
+
+        # Path 2: JSON body with base64 audio
+        elif request.data or request.is_json:
+            data = request.get_json(force=True, silent=True) or {}
+            audio_b64 = data.get("audio_b64", "")
+            if not audio_b64:
+                return jsonify({"error": "No audio data provided"}), 400
+            if "," in audio_b64:
+                audio_b64 = audio_b64.split(",", 1)[1]
+            audio_bytes = _b64.b64decode(audio_b64)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp:
+                tmp.write(audio_bytes)
+                temp_path = tmp.name
         else:
-            return jsonify({"error": "Transcription failed"}), 500
-            
+            return jsonify({"error": "No audio file or audio_b64 provided"}), 400
+
+        print(f"[Transcribe] Saved audio: {os.path.getsize(temp_path)} bytes at {temp_path}")
+
+        # Transcribe via Groq Whisper
+        text = transcribe_audio(temp_path)
+
+        # Also run voice emotion classification in parallel
+        voice_emotion = "Neutral"
+        try:
+            from models.emotion_voice import extract_mfcc_features, _convert_to_wav, _get_model
+            import numpy as np
+            wav_path = _convert_to_wav(temp_path)
+            feats = extract_mfcc_features(wav_path)
+            mdl = _get_model()
+            if mdl is not None and feats is not None:
+                voice_emotion = mdl.predict(feats.reshape(1, -1))[0]
+                proba = mdl.predict_proba(feats.reshape(1, -1))[0]
+                if float(np.max(proba)) < 0.35:
+                    voice_emotion = "Neutral"
+            if wav_path != temp_path and os.path.exists(wav_path):
+                os.remove(wav_path)
+        except Exception as ve:
+            print(f"[Transcribe] Voice emotion (non-fatal): {ve}")
+
+        if text:
+            return jsonify({"text": text, "voice_emotion": voice_emotion})
+        else:
+            return jsonify({"error": "Transcription failed", "voice_emotion": voice_emotion}), 500
+
     except Exception as e:
         print(f"Transcription Endpoint Error: {e}")
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
 @app.route("/tts", methods=["POST"])
 def tts_endpoint():

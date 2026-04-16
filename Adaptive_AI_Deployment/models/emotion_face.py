@@ -81,17 +81,24 @@ def draw_golden_ratio_lines(image, landmarks):
     for idx in points:
         cv2.circle(image, points[idx], 3, (0, 255, 0), -1) # Green dots for key points
 
-# Load the landmark classifier if it exists
-LANDMARK_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'face_landmark_model.pkl')
+# Load the DL Landmark geometry classifier if it exists
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+
+LANDMARK_MODEL_PATH = os.path.join(os.path.dirname(__file__), 'face_landmark_model.keras')
+ENCODER_PATH = os.path.join(os.path.dirname(__file__), 'face_landmark_encoder.pkl')
 landmark_clf = None
-if os.path.exists(LANDMARK_MODEL_PATH):
+landmark_encoder = None
+
+if os.path.exists(LANDMARK_MODEL_PATH) and os.path.exists(ENCODER_PATH):
     import pickle
     try:
-        with open(LANDMARK_MODEL_PATH, 'rb') as f:
-            landmark_clf = pickle.load(f)
-        print("Landmark classifier loaded successfully.")
+        landmark_clf = load_model(LANDMARK_MODEL_PATH)
+        with open(ENCODER_PATH, 'rb') as f:
+            landmark_encoder = pickle.load(f)
+        print("DL Landmark Keras model and encoder loaded successfully.")
     except Exception as e:
-        print(f"Error loading landmark classifier: {e}")
+        print(f"Error loading DL landmark classifier: {e}")
 
 def detect_face_emotion():
     """
@@ -170,15 +177,20 @@ def detect_face_emotion():
                     
                     face_features = {'ear': avg_ear, 'mar': mar, 'brow_ratio': brow_ratio}
                     
-                    # --- REFINEMENT VIA LANDMARK CLASSIFIER ---
-                    if landmark_clf:
-                        geometric_emotion = landmark_clf.predict([[avg_ear, mar, brow_ratio]])[0]
-                        # If geometric model is highly confident in certain distinct patterns, override or adjust
-                        # For example, if we detect Stress/Angry via geometry but FER says Neutral
-                        if geometric_emotion in ["Stressed", "Angry", "Fear"] and dominant_emotion == "Neutral":
-                            dominant_emotion = geometric_emotion
-                        elif geometric_emotion == "Surprise" and avg_ear > 0.38:
-                            dominant_emotion = "Surprise"
+                    # --- REFINEMENT VIA DEEP LEARNING ---
+                    if landmark_clf and landmark_encoder:
+                        features = np.array([[avg_ear, mar, brow_ratio]])
+                        try:
+                            probs = landmark_clf.predict(features, verbose=0)[0]
+                            max_idx = np.argmax(probs)
+                            geometric_emotion = landmark_encoder.inverse_transform([max_idx])[0]
+                            # If geometric model detects high stress, override
+                            if geometric_emotion in ["Stressed", "Angry", "Fear"] and dominant_emotion == "Neutral":
+                                dominant_emotion = geometric_emotion
+                            elif geometric_emotion == "Surprise" and avg_ear > 0.38:
+                                dominant_emotion = "Surprise"
+                        except Exception as e:
+                            print(f"Error running inference on DL Landmark model: {e}")
                     
                     # Descriptions
                     if avg_ear < 0.2: feature_desc_parts.append("Eyes appear tired.")
@@ -201,6 +213,97 @@ def detect_face_emotion():
     finally:
         if cam is not None:
             cam.release()
+
+def detect_face_emotion_from_b64(frame_b64: str):
+    """
+    Detect face emotion from a base64-encoded JPEG frame (from browser webcam).
+    Runs the same FER + MediaPipe pipeline as detect_face_emotion()
+    but without needing cv2.VideoCapture — works in cloud environments.
+    """
+    try:
+        import base64
+        # Decode base64 frame to numpy array
+        img_bytes = base64.b64decode(frame_b64)
+        img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        
+        if frame is None:
+            return "Neutral", {}, None, {}, "Could not decode browser frame."
+        
+        # Flip horizontally (mirror correction like VideoCapture)
+        frame = cv2.flip(frame, 1)
+        
+        # 1. FER emotion detection
+        results = detector.detect_emotions(frame)
+        dominant_emotion = "Neutral"
+        emotions_score = {}
+        if results:
+            emotions_score = results[0]["emotions"]
+            dominant_emotion = max(emotions_score, key=emotions_score.get).capitalize()
+        
+        # 2. MediaPipe Face Mesh
+        face_features = {}
+        feature_desc_parts = []
+        
+        if HAS_MEDIAPIPE:
+            rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results_mesh = face_mesh.process(rgb_image)
+            
+            if results_mesh.multi_face_landmarks:
+                for face_landmarks in results_mesh.multi_face_landmarks:
+                    landmarks = face_landmarks.landmark
+                    
+                    connection_spec = mp_drawing.DrawingSpec(color=(255, 255, 0), thickness=1, circle_radius=1)
+                    landmark_spec  = mp_drawing.DrawingSpec(color=(255, 255, 0), thickness=1, circle_radius=1)
+                    mp_drawing.draw_landmarks(
+                        image=frame,
+                        landmark_list=face_landmarks,
+                        connections=mp_face_mesh.FACEMESH_CONTOURS,
+                        landmark_drawing_spec=landmark_spec,
+                        connection_drawing_spec=connection_spec
+                    )
+                    draw_golden_ratio_lines(frame, landmarks)
+                    
+                    left_ear  = calculate_ear(landmarks, [33,  160, 158, 133, 153, 144])
+                    right_ear = calculate_ear(landmarks, [362, 385, 387, 263, 373, 380])
+                    avg_ear   = (left_ear + right_ear) / 2.0
+                    
+                    top_lip, bottom_lip = landmarks[13], landmarks[14]
+                    left_corner, right_corner = landmarks[61], landmarks[291]
+                    mar_v = np.linalg.norm(np.array([top_lip.x, top_lip.y]) - np.array([bottom_lip.x, bottom_lip.y]))
+                    mar_h = np.linalg.norm(np.array([left_corner.x, left_corner.y]) - np.array([right_corner.x, right_corner.y]))
+                    mar = mar_v / mar_h if mar_h > 0 else 0
+                    
+                    brow_inner_L = landmarks[107]; brow_inner_R = landmarks[336]
+                    eye_inner_L  = landmarks[133]; eye_inner_R  = landmarks[362]
+                    brow_d = np.linalg.norm(np.array([brow_inner_L.x, brow_inner_L.y]) - np.array([brow_inner_R.x, brow_inner_R.y]))
+                    eye_d  = np.linalg.norm(np.array([eye_inner_L.x,  eye_inner_L.y])  - np.array([eye_inner_R.x,  eye_inner_R.y]))
+                    brow_ratio = brow_d / eye_d if eye_d > 0 else 0
+                    
+                    face_features = {'ear': avg_ear, 'mar': mar, 'brow_ratio': brow_ratio}
+                    
+                    if landmark_clf:
+                        geometric_emotion = landmark_clf.predict([[avg_ear, mar, brow_ratio]])[0]
+                        if geometric_emotion in ["Stressed", "Angry", "Fear"] and dominant_emotion == "Neutral":
+                            dominant_emotion = geometric_emotion
+                        elif geometric_emotion == "Surprise" and avg_ear > 0.38:
+                            dominant_emotion = "Surprise"
+                    
+                    if avg_ear   < 0.2: feature_desc_parts.append("Eyes appear tired.")
+                    if mar       > 0.5: feature_desc_parts.append("Mouth open.")
+                    if brow_ratio< 0.6: feature_desc_parts.append("Brows furrowed.")
+        
+        # 3. Encode annotated frame
+        _, buffer = cv2.imencode('.jpg', frame)
+        processed_frame_b64 = base64.b64encode(buffer).decode('utf-8')
+        feature_desc = " ".join(feature_desc_parts) if feature_desc_parts else f"Dominant: {dominant_emotion}."
+        
+        return dominant_emotion, emotions_score, processed_frame_b64, face_features, feature_desc
+    
+    except Exception as e:
+        print(f"detect_face_emotion_from_b64 error: {e}")
+        return "Neutral", {}, None, {}, "Error processing browser frame."
+
 
 if __name__ == "__main__":
     # Test script

@@ -31,8 +31,7 @@ NUM_FEATURES = 53   # 40 MFCC + 12 Chroma + 1 RMS  - MUST match emotion_voice.py
 # ─── Dataset config ───────────────────────────────────────────────────────────
 N_SAMPLES_PER_CLASS = 800   # larger dataset for better generalization
 
-EMOTIONS = ["Happy", "Sad", "Neutral", "Trauma", "Nervous", "Angry", "Calm"]
-
+EMOTIONS = ["Happy", "Sad", "Neutral", "Trauma", "Stressed", "Angry", "Calm"]
 
 # ─── Realistic speech feature distributions ───────────────────────────────────
 #
@@ -52,7 +51,7 @@ EMOTION_PROFILES = {
     "Sad":     dict(m0_mu=-232, m0_s=16, m1_mu=-14, m1_s=13, m2_mu=-4, m2_s=6, c_mu=0.41, c_s=0.07, r_mu=0.016, r_s=0.007),
     "Neutral": dict(m0_mu=-205, m0_s=12, m1_mu= 10, m1_s=10, m2_mu= 1, m2_s=5, c_mu=0.52, c_s=0.06, r_mu=0.035, r_s=0.009),
     "Trauma":  dict(m0_mu=-252, m0_s=22, m1_mu=-22, m1_s=18, m2_mu=-7, m2_s=8, c_mu=0.34, c_s=0.09, r_mu=0.010, r_s=0.005),
-    "Nervous": dict(m0_mu=-190, m0_s=20, m1_mu= 28, m1_s=16, m2_mu= 4, m2_s=8, c_mu=0.57, c_s=0.09, r_mu=0.055, r_s=0.013),
+    "Stressed": dict(m0_mu=-190, m0_s=20, m1_mu= 28, m1_s=16, m2_mu= 4, m2_s=8, c_mu=0.57, c_s=0.09, r_mu=0.055, r_s=0.013),
     "Angry":   dict(m0_mu=-162, m0_s=24, m1_mu= 55, m1_s=20, m2_mu=10, m2_s=9, c_mu=0.68, c_s=0.09, r_mu=0.095, r_s=0.022),
     "Calm":    dict(m0_mu=-225, m0_s=10, m1_mu= -6, m1_s= 8, m2_mu=-1, m2_s=4, c_mu=0.46, c_s=0.05, r_mu=0.016, r_s=0.006),
     # fmt: on

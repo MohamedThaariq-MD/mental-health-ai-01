@@ -229,11 +229,83 @@ def get_distress_score(t, v, f, face_features):
         
     return min(1.0, score)
 
+
+# --- EMOTION-CURATED RECOMMENDATION POOLS ---
+# Each emotion group gets its own curated subset instead of random from flat pool
+
+MUSIC_BY_EMOTION = {
+    "calm":    ["Weightless by Marconi Union (Ambient)", "Gymnopédies by Satie (Piano)",
+                "River Flows in You by Yiruma (Contemporary Piano)", "Take Five by Dave Brubeck (Smooth Jazz)"],
+    "happy":   ["Happy by Pharrell Williams (Pop)", "Walking on Sunshine by Katrina & The Waves (Upbeat)",
+                "Here Comes The Sun by The Beatles (Uplifting)", "Three Little Birds by Bob Marley (Reggae/Positive)"],
+    "sad":     ["Holocene by Bon Iver (Indie Folk)", "Breathe Me by Sia (Emotional)",
+                "Experience by Ludovico Einaudi (Moving Classical)", "Clair de Lune by Debussy (Classical)"],
+    "stressed":["Weightless by Marconi Union (Ambient)", "Resonance by HOME (Synthwave Chill)",
+                "Lofi Hip Hop Radio (Focus)", "River Flows in You by Yiruma (Contemporary Piano)"],
+    "angry":   ["Strawberry Swing by Coldplay (Soft Pop)", "Resonance by HOME (Synthwave Chill)",
+                "Breathe Me by Sia (Emotional)", "Holocene by Bon Iver (Indie Folk)"],
+    "neutral": ["Lofi Hip Hop Radio (Focus)", "Take Five by Dave Brubeck (Smooth Jazz)",
+                "Weightless by Marconi Union (Ambient)", "Resonance by HOME (Synthwave Chill)"],
+}
+
+MOVIE_BY_EMOTION = {
+    "calm":    ["My Neighbor Totoro (Calm Animation)", "Amélie (Quirky Joy/Appreciation)",
+                "Soul (Finding Purpose)", "Paddington 2 (Wholesome Comfort)"],
+    "happy":   ["Singin' in the Rain (Joyful/Musical)", "Ferris Bueller's Day Off (Fun)",
+                "Spider-Man: Into the Spider-Verse (Action/Visual Flow)", "Little Miss Sunshine (Family/Acceptance)"],
+    "sad":     ["Good Will Hunting (Healing)", "The Pursuit of Happyness (Resilience)",
+                "Up (Grief and New Adventures)", "Inside Out (Understanding Emotions)"],
+    "stressed":["Paddington 2 (Wholesome Comfort)", "My Neighbor Totoro (Calm Animation)",
+                "Spirited Away (Magical Escapism)", "Soul (Finding Purpose)"],
+    "angry":   ["Inside Out (Understanding Emotions)", "Little Miss Sunshine (Family/Acceptance)",
+                "The Pursuit of Happyness (Resilience)", "Arrival (Intellectual Sci-Fi)"],
+    "neutral": ["Spirited Away (Magical Escapism)", "Arrival (Intellectual Sci-Fi)",
+                "Soul (Finding Purpose)", "Good Will Hunting (Healing)"],
+}
+
+GAME_BY_EMOTION = {
+    "calm":    ["2048 (Play on Poki: https://poki.com/en/g/2048)",
+                "Bubble Shooter (Play on Poki: https://poki.com/en/g/bubble-shooter)",
+                "Brain Test: Tricky Puzzles (Play on Poki: https://poki.com/en/g/brain-test-tricky-puzzles)"],
+    "happy":   ["Subway Surfers (Play on Poki: https://poki.com/en/g/subway-surfers)",
+                "Temple Run 2 (Play on Poki: https://poki.com/en/g/temple-run-2)",
+                "Moto X3M (Play on Poki: https://poki.com/en/g/moto-x3m)"],
+    "sad":     ["Monkey Mart (Play on Poki: https://poki.com/en/g/monkey-mart)",
+                "Bubble Shooter (Play on Poki: https://poki.com/en/g/bubble-shooter)",
+                "Minecraft Classic (Play on Poki: https://poki.com/en/g/minecraft-classic)"],
+    "stressed":["Brain Test: Tricky Puzzles (Play on Poki: https://poki.com/en/g/brain-test-tricky-puzzles)",
+                "2048 (Play on Poki: https://poki.com/en/g/2048)",
+                "Stickman Hook (Play on Poki: https://poki.com/en/g/stickman-hook)"],
+    "angry":   ["Tunnel Rush (Play on Poki: https://poki.com/en/g/tunnel-rush)",
+                "Moto X3M (Play on Poki: https://poki.com/en/g/moto-x3m)",
+                "Jetpack Joyride (Play on Poki: https://poki.com/en/g/jetpack-joyride)"],
+    "neutral": ["Crossy Road (Play on Poki: https://poki.com/en/g/crossy-road)",
+                "Stickman Hook (Play on Poki: https://poki.com/en/g/stickman-hook)",
+                "Monkey Mart (Play on Poki: https://poki.com/en/g/monkey-mart)"],
+}
+
+def _map_emotion_to_key(emotion: str) -> str:
+    """Map any raw emotion label to one of our 6 curated pool keys."""
+    e = emotion.lower()
+    if e in ("happy", "joy", "surprise", "enjoying"):     return "happy"
+    if e in ("sad", "sadness", "crying", "depressed"):    return "sad"
+    if e in ("angry", "anger", "disgust"):                return "angry"
+    if e in ("fear", "anxious", "anxiety", "nervous",
+             "stressed", "stress", "severe stress"):      return "stressed"
+    if e in ("calm", "relaxed", "content"):               return "calm"
+    if e in ("trauma", "crisis", "worthless"):            return "stressed"   # calming needed
+    return "neutral"
+
+def _curated_pick(pool_by_emotion: dict, emotion_key: str) -> str:
+    """Pick a random item from the curated pool for the given emotion key."""
+    pool = pool_by_emotion.get(emotion_key, pool_by_emotion["neutral"])
+    return random.choice(pool)
+
 def choose_therapy(text_emotion="Neutral", voice_emotion="Neutral", face_emotion="Neutral", face_features=None):
     """
     Enhanced recommendation engine.
     Fuses Voice, Text, Face, and Biometrics through a trained ML model for therapy paths,
-    and uses Reinforcement Learning engines for interactive entertainment (Music, Movie, Game).
+    and uses emotion-curated pools for Music, Movie, and Game recommendations.
     """
     text_emotion = text_emotion.capitalize()
     voice_emotion = voice_emotion.capitalize()
@@ -274,10 +346,11 @@ def choose_therapy(text_emotion="Neutral", voice_emotion="Neutral", face_emotion
         else:
             therapy = random.choice(CBT_OPTIONS)
 
-    # Resolve primary emotion for the RL entertainment engines
-    # Give priority to Face > Voice > Text for the entertainment mood
+    # Resolve primary emotion for entertainment (Face > Voice > Text)
     primary_emotion = face_emotion if face_emotion != "Neutral" else (voice_emotion if voice_emotion != "Neutral" else text_emotion)
-    primary_emotion = primary_emotion.lower()
+    emotion_key = _map_emotion_to_key(primary_emotion)
+    
+    print(f"[RL Engine] Emotion key for entertainment: '{emotion_key}' (from '{primary_emotion}')")
 
     # Determine activity and meditation based on the therapy output
     if "Crisis" in therapy:
@@ -290,23 +363,24 @@ def choose_therapy(text_emotion="Neutral", voice_emotion="Neutral", face_emotion
         activity = "Cold Shower for Reset or Gentle Stretches"
         meditation = "Advanced Box Breathing: Inhale 4s, Hold 4s, Exhale 4s, Hold 4s"
     elif "Positive" in therapy:
-        activity = "Share your joy with a friend or creative art"
+        activity = "Share your joy with a friend or do some creative art"
         meditation = "Body Scan Meditation: Deeply tuning into physical sensations"
     else:
         activity = random.choice(ACTIVITY_OPTIONS)
         meditation = random.choice(MEDITATION_OPTIONS)
 
     recommendations = {
-        "therapy": therapy,
-        "meditation": meditation,
-        "activity": activity,
-        "music": music_engine.choose_action(primary_emotion),
-        "movie": movie_engine.choose_action(primary_emotion),
-        "game": game_engine.choose_action(primary_emotion),
-        "documentary": documentary_engine.choose_action(primary_emotion)
+        "therapy":     therapy,
+        "meditation":  meditation,
+        "activity":    activity,
+        "music":       _curated_pick(MUSIC_BY_EMOTION,  emotion_key),
+        "movie":       _curated_pick(MOVIE_BY_EMOTION,  emotion_key),
+        "game":        _curated_pick(GAME_BY_EMOTION,   emotion_key),
+        "documentary": documentary_engine.choose_action(emotion_key),
     }
 
     return recommendations
+
 
 def update_recommendation_model(emotion, action, reward):
     """

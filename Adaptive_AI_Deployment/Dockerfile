@@ -3,7 +3,7 @@ FROM python:3.10-slim
 
 # Install system dependencies for OpenCV and AI libraries
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -17,7 +17,7 @@ COPY backend/requirements.txt ./backend/
 # Install any needed packages specified in requirements.txt
 # Note: Using tensorflow-cpu for smaller image size and compatibility
 RUN pip install --no-cache-dir -r backend/requirements.txt \
-    && pip install --no-cache-dir streamlit opencv-python-headless mediapipe tensorflow-cpu==2.15.0
+    && pip install --no-cache-dir streamlit opencv-python-headless mediapipe==0.10.9 protobuf==3.20.3 tensorflow-cpu==2.15.0 numpy==1.26.4
 
 # Copy the rest of the application code
 COPY . .
